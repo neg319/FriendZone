@@ -972,6 +972,40 @@ namespace FriendZone
             }
         }
 
+        private static void RecordPlannedPlacement(Zone_Settlement zone, HashSet<IntVec3> plannedCells, BuildableDef def, IntVec3 cell, Rot4 rotation, bool includeInterior, bool allowOutsideZone = false)
+        {
+            if (zone == null || zone.Map == null || plannedCells == null || def == null || !cell.InBounds(zone.Map))
+            {
+                return;
+            }
+
+            CellRect occupiedRect = GenAdj.OccupiedRect(cell, rotation, def.Size);
+            foreach (IntVec3 occupiedCell in occupiedRect)
+            {
+                if (occupiedCell.InBounds(zone.Map))
+                {
+                    plannedCells.Add(occupiedCell);
+                }
+            }
+
+            if (!includeInterior || occupiedRect.Width <= 1 || occupiedRect.Height <= 1)
+            {
+                return;
+            }
+
+            for (int x = occupiedRect.minX + 1; x < occupiedRect.maxX; x++)
+            {
+                for (int z = occupiedRect.minZ + 1; z < occupiedRect.maxZ; z++)
+                {
+                    IntVec3 interiorCell = new IntVec3(x, 0, z);
+                    if (interiorCell.InBounds(zone.Map))
+                    {
+                        plannedCells.Add(interiorCell);
+                    }
+                }
+            }
+        }
+
         private static bool CellHasNonRemovableFieldBlocker(Map map, IntVec3 cell)
         {
             if (!cell.Walkable(map))
