@@ -1,0 +1,42 @@
+name: Build Settlement Zone
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore packages
+        run: dotnet restore Source/SettlementZone/SettlementZone.csproj
+
+      - name: Build project
+        run: dotnet build Source/SettlementZone/SettlementZone.csproj --configuration Release --no-restore
+
+      - name: Package mod
+        shell: pwsh
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP 'SettlementZone'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          robocopy . $staging /E /XD .git .github Source\SettlementZone\bin Source\SettlementZone\obj | Out-Null
+          if (!(Test-Path (Join-Path $staging 'Assemblies\SettlementZone.dll'))) {
+            throw 'Build did not produce Assemblies\SettlementZone.dll'
+          }
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath SettlementZone.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SettlementZone
+          path: SettlementZone.zip
