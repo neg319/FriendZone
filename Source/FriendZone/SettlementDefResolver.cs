@@ -131,6 +131,47 @@ namespace FriendZone
             yield return SmokeleafPlantDef();
         }
 
+
+        public static ThingDef DefaultStuffFor(ThingDef thingDef)
+        {
+            if (thingDef == null || !thingDef.MadeFromStuff)
+            {
+                return null;
+            }
+
+            if (thingDef.stuffCategories != null)
+            {
+                ThingDef wood = WoodStuff();
+                if (wood != null && wood.stuffProps != null && wood.stuffProps.categories != null && thingDef.stuffCategories.Any(cat => wood.stuffProps.categories.Contains(cat)))
+                {
+                    return wood;
+                }
+
+                ThingDef stone = StoneBlocksDef();
+                if (stone != null && stone.stuffProps != null && stone.stuffProps.categories != null && thingDef.stuffCategories.Any(cat => stone.stuffProps.categories.Contains(cat)))
+                {
+                    return stone;
+                }
+
+                ThingDef steel = Thing("Steel");
+                if (steel != null && steel.stuffProps != null && steel.stuffProps.categories != null && thingDef.stuffCategories.Any(cat => steel.stuffProps.categories.Contains(cat)))
+                {
+                    return steel;
+                }
+
+                ThingDef fallback = DefDatabase<ThingDef>.AllDefsListForReading.FirstOrDefault(def => def != null
+                    && def.stuffProps != null
+                    && def.stuffProps.categories != null
+                    && thingDef.stuffCategories.Any(cat => def.stuffProps.categories.Contains(cat)));
+                if (fallback != null)
+                {
+                    return fallback;
+                }
+            }
+
+            return WoodStuff() ?? Thing("Steel");
+        }
+
         public static ThingDef WallDef()
         {
             return Thing("Wall");

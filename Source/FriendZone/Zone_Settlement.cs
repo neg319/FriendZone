@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Verse;
@@ -17,6 +16,13 @@ namespace FriendZone
         public Faction settlementFaction;
         public Dictionary<string, int> lastKnownResourceTotals = new Dictionary<string, int>();
         public Dictionary<string, float> rentCarry = new Dictionary<string, float>();
+        public string currentStatusText = "Waiting";
+        public string currentProjectText = string.Empty;
+        public int pendingConstructionCount;
+        public int pendingBlockerCount;
+        public int fieldCellCount;
+        public int lastRentDeliveredCount;
+        public string lastRentDeliveredDefName = string.Empty;
 
         private List<string> lastKnownResourceTotalKeys;
         private List<int> lastKnownResourceTotalValues;
@@ -48,6 +54,13 @@ namespace FriendZone
             Scribe_References.Look(ref settlementFaction, "settlementFaction");
             Scribe_Collections.Look(ref lastKnownResourceTotals, "lastKnownResourceTotals", LookMode.Value, LookMode.Value, ref lastKnownResourceTotalKeys, ref lastKnownResourceTotalValues);
             Scribe_Collections.Look(ref rentCarry, "rentCarry", LookMode.Value, LookMode.Value, ref rentCarryKeys, ref rentCarryValues);
+            Scribe_Values.Look(ref currentStatusText, "currentStatusText", "Waiting");
+            Scribe_Values.Look(ref currentProjectText, "currentProjectText", string.Empty);
+            Scribe_Values.Look(ref pendingConstructionCount, "pendingConstructionCount", 0);
+            Scribe_Values.Look(ref pendingBlockerCount, "pendingBlockerCount", 0);
+            Scribe_Values.Look(ref fieldCellCount, "fieldCellCount", 0);
+            Scribe_Values.Look(ref lastRentDeliveredCount, "lastRentDeliveredCount", 0);
+            Scribe_Values.Look(ref lastRentDeliveredDefName, "lastRentDeliveredDefName", string.Empty);
 
             if (settlers == null)
             {
@@ -149,11 +162,25 @@ namespace FriendZone
             string text = "FriendZoneTypeInspect".Translate(settlementKind.LabelFor());
             text += "\n" + "FriendZonePopulationInspect".Translate(ActiveSettlerCount, DesiredSettlerCount);
             text += "\n" + (settlementEnabled ? "FriendZoneStatusEnabled".Translate() : "FriendZoneStatusDisabled".Translate());
+            text += "\nActivity: " + (string.IsNullOrEmpty(currentStatusText) ? "Waiting" : currentStatusText);
+            text += "\nPending build sites: " + pendingConstructionCount;
+            text += "\nBlockers to clear: " + pendingBlockerCount;
+            text += "\nField cells: " + fieldCellCount;
             text += "\n" + "FriendZoneRentInspect".Translate();
 
             if (settlementFaction != null)
             {
                 text += "\n" + "FriendZoneFactionInspect".Translate(settlementFaction.Name);
+            }
+
+            if (!string.IsNullOrEmpty(currentProjectText))
+            {
+                text += "\nProject: " + currentProjectText;
+            }
+
+            if (lastRentDeliveredCount > 0 && !string.IsNullOrEmpty(lastRentDeliveredDefName))
+            {
+                text += "\nLast rent delivery: " + lastRentDeliveredCount + " x " + lastRentDeliveredDefName;
             }
 
             if (!planGenerated)
@@ -265,6 +292,13 @@ namespace FriendZone
             nextSettlerSpawnTick = Find.TickManager.TicksGame + 300;
             lastKnownResourceTotals.Clear();
             rentCarry.Clear();
+            currentStatusText = "Refreshing plan";
+            currentProjectText = string.Empty;
+            pendingConstructionCount = 0;
+            pendingBlockerCount = 0;
+            fieldCellCount = 0;
+            lastRentDeliveredCount = 0;
+            lastRentDeliveredDefName = string.Empty;
         }
 
         private void OpenTypeMenu()
