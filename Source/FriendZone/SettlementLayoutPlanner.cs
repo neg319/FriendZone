@@ -52,6 +52,22 @@ namespace FriendZone
             }
         }
 
+        public static IEnumerable<IntVec3> GetPlannedWorkCells(Zone_Settlement zone, int requiredBeds)
+        {
+            HashSet<IntVec3> plannedCells = new HashSet<IntVec3>();
+            if (zone == null || zone.Map == null || zone.cells == null || zone.cells.Count < 9)
+            {
+                return plannedCells;
+            }
+
+            requiredBeds = Mathf.Max(1, requiredBeds);
+            CollectSharedStructureCells(zone, plannedCells);
+            CollectStorageCells(zone, plannedCells);
+            CollectHousingCells(zone, requiredBeds, plannedCells);
+            CollectFieldCells(zone, plannedCells);
+            return plannedCells;
+        }
+
         public static ThingDef GetDesiredCropForCell(Zone_Settlement zone, IntVec3 cell)
         {
             foreach (FieldRowPlan row in GetFieldRows(zone))
@@ -247,7 +263,7 @@ namespace FriendZone
             for (int i = 0; i < cells.Count; i++)
             {
                 IntVec3 cell = cells[i];
-                if (!cell.InBounds(zone.Map) || zone.ContainsCell(cell) || !cell.Standable(zone.Map))
+                if (!cell.InBounds(zone.Map) || zone.ContainsCell(cell))
                 {
                     return false;
                 }
@@ -257,7 +273,7 @@ namespace FriendZone
                     return false;
                 }
 
-                if (cell.GetEdifice(zone.Map) != null)
+                if (CellHasNonRemovableFieldBlocker(zone.Map, cell))
                 {
                     return false;
                 }
@@ -512,12 +528,12 @@ namespace FriendZone
             int bestDistance = int.MaxValue;
             foreach (IntVec3 cell in zone.cells)
             {
-                if (!cell.InBounds(zone.Map) || !cell.Standable(zone.Map))
+                if (!cell.InBounds(zone.Map))
                 {
                     continue;
                 }
 
-                if (cell.GetEdifice(zone.Map) != null)
+                if (CellHasPermanentStructureBlocker(zone.Map, cell))
                 {
                     continue;
                 }
@@ -581,6 +597,257 @@ namespace FriendZone
                     }
                 }
             }
+        }
+
+        private static void CollectSharedStructureCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            switch (zone.settlementKind)
+            {
+                case SettlementKind.Camp:
+                    CollectCampCommonCells(zone, plannedCells);
+                    break;
+                case SettlementKind.Farm:
+                    CollectFarmCommonCells(zone, plannedCells);
+                    break;
+                case SettlementKind.Tavern:
+                    CollectTavernCells(zone, plannedCells);
+                    break;
+                case SettlementKind.Inn:
+                    CollectInnCells(zone, plannedCells);
+                    break;
+                case SettlementKind.Village:
+                    CollectVillageCommonCells(zone, plannedCells);
+                    break;
+                default:
+                    CollectCampCommonCells(zone, plannedCells);
+                    break;
+            }
+        }
+
+        private static void CollectStorageCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            ThingDef shelfDef = SettlementDefResolver.ShelfDef();
+            if (shelfDef == null)
+            {
+                return;
+            }
+
+            RecordPlannedPlacement(zone, plannedCells, shelfDef, GetStorageCell(zone), Rot4.North, includeInterior: true);
+        }
+
+        private static void CollectHousingCells(Zone_Settlement zone, int requiredBeds, HashSet<IntVec3> plannedCells)
+        {
+            int existingBeds = CountExistingOrPlannedBeds(zone);
+            int remainingBeds = Mathf.Max(0, requiredBeds - existingBeds);
+            if (remainingBeds <= 0)
+            {
+                return;
+            }
+
+            ThingDef bedDef = SettlementDefResolver.BedDef();
+            List<CellRect> cabinRects = GetCandidateCabinRects(zone).ToList();
+            for (int i = 0; i < cabinRects.Count && remainingBeds > 0; i++)
+            {
+                CellRect cabin = cabinRects[i];
+                RecordRoomCells(zone, plannedCells, cabin);
+                RecordPlannedPlacement(zone, plannedCells, bedDef, cabin.CenterCell + new IntVec3(0, 0, 1), Rot4.North, includeInterior: true);
+                remainingBeds--;
+            }
+
+            if (remainingBeds > 0)
+            {
+                CellRect dorm = InnerRoom(zone, Mathf.Max(7, zone.ZoneBounds.Width - 2), Mathf.Max(5, Mathf.Min(9, zone.ZoneBounds.Height - 4)));
+                RecordRoomCells(zone, plannedCells, dorm);
+                for (int x = dorm.minX + 1; x <= dorm.maxX - 1 && remainingBeds > 0; x += 2)
+                {
+                    IntVec3 bedCell = new IntVec3(x, 0, dorm.CenterCell.z + 1);
+                    if (!zone.ContainsCell(bedCell))
+                    {
+                        continue;
+                    }
+
+                    RecordPlannedPlacement(zone, plannedCells, bedDef, bedCell, Rot4.North, includeInterior: true);
+                    remainingBeds--;
+                }
+            }
+        }
+
+        private static void CollectFieldCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            foreach (FieldRowPlan row in GetFieldRows(zone))
+            {
+                for (int i = 0; i < row.Cells.Count; i++)
+                {
+                    if (row.Cells[i].InBounds(zone.Map))
+                    {
+                        plannedCells.Add(row.Cells[i]);
+                    }
+                }
+            }
+        }
+
+        private static void CollectCampCommonCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            IntVec3 center = zone.BestCenterCell;
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.CampfireDef(), center, Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TableDef(), center + new IntVec3(0, 0, -2), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(-1, 0, -3), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(1, 0, -3), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TorchLampDef(), center + new IntVec3(-2, 0, 0), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TorchLampDef(), center + new IntVec3(2, 0, 0), Rot4.North, includeInterior: true);
+        }
+
+        private static void CollectFarmCommonCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            CollectCampCommonCells(zone, plannedCells);
+            IntVec3 storageCell = GetStorageCell(zone);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TorchLampDef(), storageCell + new IntVec3(-1, 0, 0), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TorchLampDef(), storageCell + new IntVec3(1, 0, 0), Rot4.North, includeInterior: true);
+        }
+
+        private static void CollectTavernCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            CellRect room = InnerRoom(zone, Mathf.Min(11, zone.ZoneBounds.Width - 2), Mathf.Min(7, zone.ZoneBounds.Height - 4));
+            RecordRoomCells(zone, plannedCells, room);
+            IntVec3 center = room.CenterCell;
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TableDef(), center + new IntVec3(-2, 0, -1), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TableDef(), center + new IntVec3(2, 0, -1), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(-3, 0, -2), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(-1, 0, -2), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(1, 0, -2), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(3, 0, -2), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.CampfireDef(), center + new IntVec3(0, 0, 1), Rot4.North, includeInterior: true);
+        }
+
+        private static void CollectInnCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            CellRect room = InnerRoom(zone, Mathf.Min(10, zone.ZoneBounds.Width - 2), Mathf.Min(8, zone.ZoneBounds.Height - 4));
+            RecordRoomCells(zone, plannedCells, room);
+            IntVec3 center = room.CenterCell;
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TableDef(), center + new IntVec3(0, 0, -1), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(-1, 0, -2), Rot4.South, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(1, 0, -2), Rot4.South, includeInterior: true);
+        }
+
+        private static void CollectVillageCommonCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells)
+        {
+            CollectCampCommonCells(zone, plannedCells);
+            IntVec3 center = zone.BestCenterCell;
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.TableDef(), center + new IntVec3(0, 0, 2), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(-1, 0, 1), Rot4.North, includeInterior: true);
+            RecordPlannedPlacement(zone, plannedCells, SettlementDefResolver.ChairDef(), center + new IntVec3(1, 0, 1), Rot4.North, includeInterior: true);
+        }
+
+        private static void RecordRoomCells(Zone_Settlement zone, HashSet<IntVec3> plannedCells, CellRect room)
+        {
+            foreach (IntVec3 cell in room)
+            {
+                if (cell.InBounds(zone.Map) && zone.ContainsCell(cell))
+                {
+                    plannedCells.Add(cell);
+                }
+            }
+        }
+
+        private static void RecordPlannedPlacement(Zone_Settlement zone, HashSet<IntVec3> plannedCells, BuildableDef def, IntVec3 cell, Rot4 rotation, bool includeInterior)
+        {
+            if (zone == null || zone.Map == null || plannedCells == null || def == null || !cell.InBounds(zone.Map))
+            {
+                return;
+            }
+
+            CellRect occupiedRect = GenAdj.OccupiedRect(cell, rotation, def.Size);
+            foreach (IntVec3 occupiedCell in occupiedRect)
+            {
+                if (occupiedCell.InBounds(zone.Map))
+                {
+                    plannedCells.Add(occupiedCell);
+                }
+            }
+
+            if (!includeInterior || occupiedRect.Width <= 1 || occupiedRect.Height <= 1)
+            {
+                return;
+            }
+
+            for (int x = occupiedRect.minX + 1; x < occupiedRect.maxX; x++)
+            {
+                for (int z = occupiedRect.minZ + 1; z < occupiedRect.maxZ; z++)
+                {
+                    IntVec3 interiorCell = new IntVec3(x, 0, z);
+                    if (interiorCell.InBounds(zone.Map))
+                    {
+                        plannedCells.Add(interiorCell);
+                    }
+                }
+            }
+        }
+
+        private static bool CellHasNonRemovableFieldBlocker(Map map, IntVec3 cell)
+        {
+            if (!cell.Walkable(map))
+            {
+                List<Thing> things = cell.GetThingList(map);
+                for (int i = 0; i < things.Count; i++)
+                {
+                    Thing thing = things[i];
+                    if (thing == null || thing.Destroyed)
+                    {
+                        continue;
+                    }
+
+                    if (thing is Plant || (thing.def != null && thing.def.EverHaulable))
+                    {
+                        continue;
+                    }
+
+                    return true;
+                }
+            }
+
+            return cell.GetEdifice(map) != null;
+        }
+
+        private static bool CellHasPermanentStructureBlocker(Map map, IntVec3 cell)
+        {
+            if (map == null || !cell.InBounds(map))
+            {
+                return true;
+            }
+
+            if (cell.GetEdifice(map) != null)
+            {
+                return true;
+            }
+
+            bool hasRemovableBlocker = false;
+            List<Thing> things = cell.GetThingList(map);
+            for (int i = 0; i < things.Count; i++)
+            {
+                Thing thing = things[i];
+                if (thing == null || thing.Destroyed)
+                {
+                    continue;
+                }
+
+                if (thing is Plant || (thing.def != null && thing.def.EverHaulable))
+                {
+                    hasRemovableBlocker = true;
+                    continue;
+                }
+
+                if (thing.def.passability != Traversability.Standable)
+                {
+                    return true;
+                }
+            }
+
+            if (!cell.Walkable(map) && !hasRemovableBlocker)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static bool TryPlace(Zone_Settlement zone, BuildableDef def, IntVec3 cell, Rot4 rotation, ThingDef stuff = null)

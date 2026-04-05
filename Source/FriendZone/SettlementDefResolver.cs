@@ -43,12 +43,23 @@ namespace FriendZone
 
         public static ThingDef StoneBlocksDef()
         {
-            return Thing("SandstoneBlocks")
+            return Thing("BlocksMarble")
+                ?? Thing("BlocksSandstone")
+                ?? Thing("BlocksGranite")
+                ?? Thing("BlocksLimestone")
+                ?? Thing("BlocksSlate")
+                ?? Thing("MarbleBlocks")
+                ?? Thing("SandstoneBlocks")
                 ?? Thing("GraniteBlocks")
                 ?? Thing("LimestoneBlocks")
                 ?? Thing("SlateBlocks")
-                ?? Thing("MarbleBlocks")
-                ?? DefDatabase<ThingDef>.AllDefsListForReading.FirstOrDefault(def => def != null && def.defName != null && def.defName.EndsWith("Blocks"));
+                ?? DefDatabase<ThingDef>.AllDefsListForReading.FirstOrDefault(def => def != null
+                    && def.defName != null
+                    && (def.defName == "BlocksMarble"
+                        || def.defName == "BlocksSandstone"
+                        || def.defName == "BlocksGranite"
+                        || def.defName == "BlocksLimestone"
+                        || def.defName == "BlocksSlate"));
         }
 
         public static ThingDef BedDef()

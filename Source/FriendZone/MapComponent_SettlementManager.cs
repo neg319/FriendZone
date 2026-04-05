@@ -314,6 +314,11 @@ namespace FriendZone
                     continue;
                 }
 
+                if (TryAssignCleanupJob(pawn, zone))
+                {
+                    continue;
+                }
+
                 if (TryAssignFarmJob(pawn, zone))
                 {
                     continue;
@@ -548,6 +553,132 @@ namespace FriendZone
             }
 
             return costs;
+        }
+
+        private bool TryAssignCleanupJob(Pawn pawn, Zone_Settlement zone)
+        {
+            JobDef cutPlantJobDef = SettlementDefResolver.Job("CutPlant");
+            JobDef haulToCellJobDef = SettlementDefResolver.Job("HaulToCell");
+            if (cutPlantJobDef == null && haulToCellJobDef == null)
+            {
+                return false;
+            }
+
+            IEnumerable<IntVec3> plannedCells = SettlementLayoutPlanner.GetPlannedWorkCells(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount + 1));
+            HashSet<IntVec3> fieldCells = new HashSet<IntVec3>(SettlementLayoutPlanner.GetFieldCells(zone));
+            foreach (IntVec3 cell in plannedCells.OrderBy(targetCell => targetCell.DistanceToSquared(pawn.Position)))
+            {
+                if (!cell.InBounds(map))
+                {
+                    continue;
+                }
+
+                List<Thing> things = cell.GetThingList(map);
+                for (int i = 0; i < things.Count; i++)
+                {
+                    Thing thing = things[i];
+                    if (thing == null || thing.Destroyed)
+                    {
+                        continue;
+                    }
+
+                    if (thing is Plant plant)
+                    {
+                        if (fieldCells.Contains(cell))
+                        {
+                            ThingDef desiredCrop = SettlementLayoutPlanner.GetDesiredCropForCell(zone, cell);
+                            if (desiredCrop != null && plant.def == desiredCrop)
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (cutPlantJobDef != null && pawn.CanReserveAndReach(plant, PathEndMode.Touch, Danger.Some))
+                        {
+                            Job cutJob = JobMaker.MakeJob(cutPlantJobDef, plant);
+                            if (TryTakeJob(pawn, cutJob))
+                            {
+                                return true;
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (!IsChunkBlocker(thing) || haulToCellJobDef == null || !pawn.CanReserveAndReach(thing, PathEndMode.Touch, Danger.Some))
+                    {
+                        continue;
+                    }
+
+                    IntVec3 dumpCell = FindCleanupDumpCell(zone, cell);
+                    if (!dumpCell.IsValid)
+                    {
+                        continue;
+                    }
+
+                    Job haulJob = JobMaker.MakeJob(haulToCellJobDef, thing, dumpCell);
+                    haulJob.count = Mathf.Min(thing.stackCount, thing.def.stackLimit);
+                    if (TryTakeJob(pawn, haulJob))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsChunkBlocker(Thing thing)
+        {
+            if (thing == null || thing.def == null || thing.Destroyed)
+            {
+                return false;
+            }
+
+            if (!thing.def.EverHaulable)
+            {
+                return false;
+            }
+
+            return thing.def.defName != null && thing.def.defName.IndexOf("Chunk", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private IntVec3 FindCleanupDumpCell(Zone_Settlement zone, IntVec3 blockedCell)
+        {
+            IEnumerable<IntVec3> reservedCells = SettlementLayoutPlanner.GetPlannedWorkCells(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount + 1));
+            HashSet<IntVec3> reserved = new HashSet<IntVec3>(reservedCells);
+            IntVec3 best = IntVec3.Invalid;
+            int bestDistance = int.MaxValue;
+
+            for (int radius = 2; radius <= 16; radius++)
+            {
+                foreach (IntVec3 cell in GenRadial.RadialCellsAround(blockedCell, radius, true))
+                {
+                    if (!cell.InBounds(map) || zone.ContainsCell(cell) || reserved.Contains(cell))
+                    {
+                        continue;
+                    }
+
+                    if (!cell.Standable(map) || cell.GetEdifice(map) != null)
+                    {
+                        continue;
+                    }
+
+                    int distance = cell.DistanceToSquared(blockedCell);
+                    if (distance < bestDistance)
+                    {
+                        best = cell;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (best.IsValid)
+                {
+                    return best;
+                }
+            }
+
+            return best;
         }
 
         private int CountSettlementResources(Zone_Settlement zone, ThingDef def)
