@@ -164,7 +164,7 @@ namespace FriendZone
             return text;
         }
 
-        public override IEnumerable GetGizmos()
+        public override IEnumerable<Gizmo> GetGizmos()
         {
             foreach (Gizmo gizmo in base.GetGizmos())
             {
@@ -208,7 +208,7 @@ namespace FriendZone
             };
         }
 
-        public override IEnumerable GetZoneAddGizmos()
+        public override IEnumerable<Gizmo> GetZoneAddGizmos()
         {
             yield return DesignatorUtility.FindAllowedDesignator<Designator_ZoneAdd_Settlement>();
         }
