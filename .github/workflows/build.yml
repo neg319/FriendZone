@@ -37,7 +37,7 @@ jobs:
             throw 'Build did not produce Assemblies/FriendZone.dll'
           }
 
-          $itemsToCopy = @('About', 'Defs', 'Languages', 'Textures', 'Assemblies', 'README.md')
+          $itemsToCopy = @('About', 'Defs', 'Patches', 'Languages', 'Textures', 'Assemblies', 'README.md')
           foreach ($item in $itemsToCopy) {
             if (Test-Path $item) {
               Copy-Item $item -Destination $staging -Recurse -Force
