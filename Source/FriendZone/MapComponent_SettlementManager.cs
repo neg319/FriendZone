@@ -43,7 +43,6 @@ namespace FriendZone
             zone.CleanupSettlers();
             SettlementFactionUtility.ResolveFaction(zone);
             SettlementLayoutPlanner.EnsureLayout(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount + 1));
-            RefreshSettlementOwnership(zone);
 
             if (!zone.starterSuppliesDelivered)
             {
@@ -53,10 +52,9 @@ namespace FriendZone
             }
 
             EnsureLord(zone);
-            AssignSettlementJobs(zone);
             ProgressConstruction(zone);
+            AssignSettlementJobs(zone);
             ProcessRent(zone);
-            UpdateZoneStatus(zone);
 
             if (zone.ActiveSettlerCount >= zone.DesiredSettlerCount)
             {
@@ -76,7 +74,6 @@ namespace FriendZone
             if (TrySpawnSettler(zone))
             {
                 SettlementLayoutPlanner.EnsureLayout(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount));
-                RefreshSettlementOwnership(zone);
                 zone.nextSettlerSpawnTick = Find.TickManager.TicksGame + RepeatSpawnDelay;
             }
             else
@@ -84,7 +81,6 @@ namespace FriendZone
                 zone.nextSettlerSpawnTick = Find.TickManager.TicksGame + RetryDelay;
             }
         }
-
 
         private bool TrySpawnSettler(Zone_Settlement zone)
         {
@@ -303,22 +299,17 @@ namespace FriendZone
                     continue;
                 }
 
+                if (TryDepositInventoryToStorage(pawn, zone))
+                {
+                    continue;
+                }
+
                 if (TryAssignCleanupJob(pawn, zone))
                 {
                     continue;
                 }
 
-                if (TryAssignConstructionApproachJob(pawn, zone))
-                {
-                    continue;
-                }
-
                 if (TryAssignFarmJob(pawn, zone))
-                {
-                    continue;
-                }
-
-                if (TryDepositInventoryToStorage(pawn, zone))
                 {
                     continue;
                 }
@@ -331,7 +322,6 @@ namespace FriendZone
                 TryReturnToSettlement(pawn, zone);
             }
         }
-
 
         private bool ShouldAssignJob(Pawn pawn)
         {
@@ -370,22 +360,19 @@ namespace FriendZone
             }
 
             MoveBuilderTowardSite(builder, site.Position);
+
             if (builder.Position.DistanceToSquared(site.Position) > 2)
             {
                 return;
             }
 
-            if (Find.TickManager.TicksGame % TickInterval != 0)
+            if (Find.TickManager.TicksGame % 500 != 0)
             {
                 return;
             }
 
-            if (TryCompleteConstructionSite(zone, site))
-            {
-                RefreshSettlementOwnership(zone);
-            }
+            TryCompleteConstructionSite(zone, site);
         }
-
 
         private Thing FindNextConstructionSite(Zone_Settlement zone)
         {
@@ -394,11 +381,9 @@ namespace FriendZone
                     && !thing.Destroyed
                     && thing.Faction == zone.settlementFaction
                     && (thing is Blueprint_Build || thing is Frame))
-                .OrderByDescending(ConstructionPriority)
-                .ThenBy(thing => thing.Position.DistanceToSquared(zone.BestCenterCell))
+                .OrderBy(thing => thing.Position.DistanceToSquared(zone.BestCenterCell))
                 .FirstOrDefault();
         }
-
 
         private Pawn FindClosestAvailableSettler(Zone_Settlement zone, IntVec3 targetCell)
         {
@@ -976,36 +961,7 @@ namespace FriendZone
         private IEnumerable<Thing> EnumerateSettlementThings(Zone_Settlement zone)
         {
             HashSet<Thing> seen = new HashSet<Thing>();
-            HashSet<IntVec3> cellsToCheck = new HashSet<IntVec3>();
-
-            if (zone?.cells != null)
-            {
-                foreach (IntVec3 cell in zone.cells)
-                {
-                    if (cell.InBounds(map))
-                    {
-                        cellsToCheck.Add(cell);
-                    }
-                }
-            }
-
-            foreach (IntVec3 cell in SettlementLayoutPlanner.GetPlannedWorkCells(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount + 1)))
-            {
-                if (cell.InBounds(map))
-                {
-                    cellsToCheck.Add(cell);
-                }
-            }
-
-            foreach (IntVec3 cell in EnumerateSettlementResourceCells(zone))
-            {
-                if (cell.InBounds(map))
-                {
-                    cellsToCheck.Add(cell);
-                }
-            }
-
-            foreach (IntVec3 cell in cellsToCheck)
+            foreach (IntVec3 cell in zone.cells)
             {
                 List<Thing> things = cell.GetThingList(map);
                 for (int i = 0; i < things.Count; i++)
@@ -1022,232 +978,6 @@ namespace FriendZone
             }
         }
 
-
-        private bool TryAssignConstructionApproachJob(Pawn pawn, Zone_Settlement zone)
-        {
-            Thing site = FindNextConstructionSite(zone);
-            if (site == null)
-            {
-                return false;
-            }
-
-            if (pawn.Position.DistanceToSquared(site.Position) <= 2)
-            {
-                return false;
-            }
-
-            JobDef gotoJobDef = SettlementDefResolver.Job("Goto");
-            if (gotoJobDef == null || !pawn.CanReach(site.Position, PathEndMode.Touch, Danger.Some))
-            {
-                return false;
-            }
-
-            Job job = JobMaker.MakeJob(gotoJobDef, site.Position);
-            job.expiryInterval = 600;
-            return TryTakeJob(pawn, job);
-        }
-
-        private float ConstructionPriority(Thing thing)
-        {
-            ThingDef buildDef = thing?.def?.entityDefToBuild as ThingDef;
-            if (buildDef == null)
-            {
-                return 0f;
-            }
-
-            if (buildDef == SettlementDefResolver.DoorDef())
-            {
-                return 300f;
-            }
-
-            if (buildDef == SettlementDefResolver.WallDef())
-            {
-                return 250f;
-            }
-
-            if (buildDef == SettlementDefResolver.BedDef())
-            {
-                return 200f;
-            }
-
-            if (buildDef == SettlementDefResolver.ShelfDef())
-            {
-                return 150f;
-            }
-
-            if (buildDef == SettlementDefResolver.TableDef() || buildDef == SettlementDefResolver.ChairDef())
-            {
-                return 100f;
-            }
-
-            return 50f;
-        }
-
-        private void RefreshSettlementOwnership(Zone_Settlement zone)
-        {
-            if (zone == null || zone.settlementFaction == null)
-            {
-                return;
-            }
-
-            foreach (Thing thing in EnumerateSettlementThings(zone))
-            {
-                if (thing == null || thing.Destroyed || thing is Pawn || thing is Plant || thing.def == null || !thing.def.CanHaveFaction)
-                {
-                    continue;
-                }
-
-                if (thing.Faction == Faction.OfPlayer)
-                {
-                    continue;
-                }
-
-                if (thing.Faction == null || thing.Faction == zone.settlementFaction || !thing.Faction.IsPlayer)
-                {
-                    thing.SetFaction(zone.settlementFaction);
-                }
-            }
-        }
-
-        private void UpdateZoneStatus(Zone_Settlement zone)
-        {
-            if (zone == null)
-            {
-                return;
-            }
-
-            zone.pendingConstructionCount = EnumerateSettlementThings(zone)
-                .Count(thing => thing != null && !thing.Destroyed && thing.Faction == zone.settlementFaction && (thing is Blueprint_Build || thing is Frame));
-            zone.pendingBlockerCount = CountPendingBlockers(zone);
-            zone.fieldCellCount = SettlementLayoutPlanner.GetFieldCells(zone).Count();
-            zone.currentProjectText = DescribeCurrentProject(zone);
-
-            if (zone.pendingBlockerCount > 0)
-            {
-                zone.currentStatusText = "Clearing ground";
-            }
-            else if (zone.pendingConstructionCount > 0)
-            {
-                zone.currentStatusText = "Building settlement";
-            }
-            else if (zone.ActiveSettlerCount < zone.DesiredSettlerCount)
-            {
-                zone.currentStatusText = "Waiting for settlers";
-            }
-            else if (HasHarvestableCrops(zone))
-            {
-                zone.currentStatusText = "Harvesting fields";
-            }
-            else if (HasEmptyFieldCells(zone))
-            {
-                zone.currentStatusText = "Sowing fields";
-            }
-            else
-            {
-                zone.currentStatusText = "Maintaining settlement";
-            }
-        }
-
-        private int CountPendingBlockers(Zone_Settlement zone)
-        {
-            HashSet<IntVec3> seen = new HashSet<IntVec3>();
-            int count = 0;
-            foreach (IntVec3 cell in SettlementLayoutPlanner.GetPlannedWorkCells(zone, Mathf.Max(zone.DesiredSettlerCount, zone.ActiveSettlerCount + 1)))
-            {
-                if (!cell.InBounds(map) || !seen.Add(cell))
-                {
-                    continue;
-                }
-
-                List<Thing> things = cell.GetThingList(map);
-                for (int i = 0; i < things.Count; i++)
-                {
-                    Thing thing = things[i];
-                    if (thing == null || thing.Destroyed)
-                    {
-                        continue;
-                    }
-
-                    if (thing is Plant plant)
-                    {
-                        ThingDef desiredCrop = SettlementLayoutPlanner.GetDesiredCropForCell(zone, cell);
-                        if (desiredCrop != null && plant.def == desiredCrop)
-                        {
-                            continue;
-                        }
-
-                        count++;
-                        break;
-                    }
-
-                    if (IsChunkBlocker(thing))
-                    {
-                        count++;
-                        break;
-                    }
-                }
-            }
-
-            return count;
-        }
-
-        private string DescribeCurrentProject(Zone_Settlement zone)
-        {
-            Thing nextSite = FindNextConstructionSite(zone);
-            if (nextSite != null)
-            {
-                ThingDef buildDef = nextSite.def?.entityDefToBuild as ThingDef;
-                if (buildDef != null)
-                {
-                    return "Constructing " + buildDef.label;
-                }
-            }
-
-            if (zone.pendingBlockerCount > 0)
-            {
-                return "Clearing trees and chunks";
-            }
-
-            if (HasHarvestableCrops(zone))
-            {
-                return "Harvesting crops";
-            }
-
-            if (HasEmptyFieldCells(zone))
-            {
-                return "Planting crops";
-            }
-
-            return zone.planGenerated ? "Settlement established" : "Generating layout";
-        }
-
-        private bool HasHarvestableCrops(Zone_Settlement zone)
-        {
-            foreach (IntVec3 cell in SettlementLayoutPlanner.GetFieldCells(zone))
-            {
-                Plant plant = GetPlantAt(cell);
-                if (plant != null && plant.HarvestableNow)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool HasEmptyFieldCells(Zone_Settlement zone)
-        {
-            foreach (IntVec3 cell in SettlementLayoutPlanner.GetFieldCells(zone))
-            {
-                if (GetPlantAt(cell) == null)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void InitializeResourceSnapshot(Zone_Settlement zone)
         {
             zone.lastKnownResourceTotals = CalculateResourceTotals(zone);
@@ -1256,9 +986,6 @@ namespace FriendZone
 
         private void ProcessRent(Zone_Settlement zone)
         {
-            zone.lastRentDeliveredCount = 0;
-            zone.lastRentDeliveredDefName = string.Empty;
-
             Dictionary<string, int> currentTotals = CalculateResourceTotals(zone);
             if (zone.lastKnownResourceTotals == null || zone.lastKnownResourceTotals.Count == 0)
             {
@@ -1303,14 +1030,11 @@ namespace FriendZone
                 carry -= removed;
                 zone.rentCarry[pair.Key] = carry;
                 currentTotals[pair.Key] = Mathf.Max(0, pair.Value - removed);
-                zone.lastRentDeliveredCount += removed;
-                zone.lastRentDeliveredDefName = resourceDef.label;
                 DeliverRentToPlayer(zone, resourceDef, removed);
             }
 
             zone.lastKnownResourceTotals = currentTotals;
         }
-
 
         private Dictionary<string, int> CalculateResourceTotals(Zone_Settlement zone)
         {

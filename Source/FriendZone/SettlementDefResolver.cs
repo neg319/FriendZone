@@ -17,6 +17,11 @@ namespace FriendZone
             return DefDatabase<JobDef>.GetNamedSilentFail(defName);
         }
 
+        public static TerrainDef Terrain(string defName)
+        {
+            return DefDatabase<TerrainDef>.GetNamedSilentFail(defName);
+        }
+
         public static WorkTypeDef WorkType(string defName)
         {
             return DefDatabase<WorkTypeDef>.GetNamedSilentFail(defName);
@@ -172,6 +177,34 @@ namespace FriendZone
             return WoodStuff() ?? Thing("Steel");
         }
 
+
+        public static TerrainDef InteriorFloorTerrain(SettlementKind kind)
+        {
+            switch (kind)
+            {
+                case SettlementKind.Tavern:
+                case SettlementKind.Inn:
+                case SettlementKind.Village:
+                    return Terrain("FlagstoneSandstone")
+                        ?? Terrain("FlagstoneGranite")
+                        ?? Terrain("FlagstoneMarble")
+                        ?? Terrain("Concrete")
+                        ?? Terrain("WoodPlankFloor");
+                case SettlementKind.Camp:
+                case SettlementKind.Farm:
+                default:
+                    return Terrain("WoodPlankFloor")
+                        ?? Terrain("Concrete")
+                        ?? Terrain("FlagstoneSandstone");
+            }
+        }
+
+        public static TerrainDef TilledFieldTerrain()
+        {
+            return Terrain("SoilRich")
+                ?? Terrain("Soil");
+        }
+
         public static ThingDef WallDef()
         {
             return Thing("Wall");
@@ -194,7 +227,7 @@ namespace FriendZone
 
         public static ThingDef TableDef()
         {
-            return Thing("Table1x2c") ?? Thing("Table2x2c");
+            return Thing("Table2x2c") ?? Thing("Table1x2c");
         }
 
         public static ThingDef ChairDef()
