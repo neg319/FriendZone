@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
@@ -8,6 +9,16 @@ namespace FriendZone
 {
     public static class SettlementLayoutPlanner
     {
+        private const int FieldRowLength = 6;
+        private const int FieldRowGap = 1;
+        private const int FieldBufferFromZone = 2;
+
+        public class FieldRowPlan
+        {
+            public List<IntVec3> Cells = new List<IntVec3>();
+            public ThingDef PlantDef;
+        }
+
         public static void EnsureLayout(Zone_Settlement zone, int requiredBeds)
         {
             if (zone == null || zone.Map == null || zone.cells == null || zone.cells.Count < 9)
@@ -19,42 +30,39 @@ namespace FriendZone
             requiredBeds = Mathf.Max(1, requiredBeds);
 
             GenerateSharedStructures(zone);
+            EnsureStorageContainer(zone);
             EnsureHousing(zone, requiredBeds);
             EnsureFieldMarkers(zone);
             zone.planGenerated = true;
         }
 
+        public static IEnumerable<FieldRowPlan> GetFieldRows(Zone_Settlement zone)
+        {
+            return BuildFieldRows(zone);
+        }
+
         public static IEnumerable<IntVec3> GetFieldCells(Zone_Settlement zone)
         {
-            if (zone == null || zone.Map == null || zone.cells == null || zone.cells.Count == 0)
+            foreach (FieldRowPlan row in GetFieldRows(zone))
             {
-                yield break;
-            }
-
-            CellRect bounds = zone.ZoneBounds;
-            int fieldHeight = Mathf.Max(3, bounds.Height / 3);
-            int minZ = bounds.minZ + 1;
-            int maxZ = Mathf.Min(bounds.maxZ - 1, minZ + fieldHeight - 1);
-
-            for (int z = minZ; z <= maxZ; z++)
-            {
-                for (int x = bounds.minX + 1; x <= bounds.maxX - 1; x++)
+                for (int i = 0; i < row.Cells.Count; i++)
                 {
-                    IntVec3 cell = new IntVec3(x, 0, z);
-                    if (!cell.InBounds(zone.Map) || !zone.ContainsCell(cell) || !cell.Standable(zone.Map))
-                    {
-                        continue;
-                    }
-
-                    Building edifice = cell.GetEdifice(zone.Map);
-                    if (edifice != null)
-                    {
-                        continue;
-                    }
-
-                    yield return cell;
+                    yield return row.Cells[i];
                 }
             }
+        }
+
+        public static ThingDef GetDesiredCropForCell(Zone_Settlement zone, IntVec3 cell)
+        {
+            foreach (FieldRowPlan row in GetFieldRows(zone))
+            {
+                if (row.Cells.Contains(cell))
+                {
+                    return row.PlantDef ?? SettlementDefResolver.PotatoPlantDef();
+                }
+            }
+
+            return SettlementDefResolver.PotatoPlantDef();
         }
 
         public static IntVec3 GetStorageCell(Zone_Settlement zone)
@@ -64,30 +72,31 @@ namespace FriendZone
                 return IntVec3.Invalid;
             }
 
-            IntVec3 center = zone.BestCenterCell;
-            if (center.IsValid && center.InBounds(zone.Map) && zone.ContainsCell(center) && center.Standable(zone.Map) && center.GetEdifice(zone.Map) == null)
-            {
-                return center;
-            }
-
-            IntVec3 best = IntVec3.Invalid;
-            int bestDistance = int.MaxValue;
+            ThingDef shelfDef = SettlementDefResolver.ShelfDef();
             foreach (IntVec3 cell in zone.cells)
             {
-                if (!cell.InBounds(zone.Map) || !cell.Standable(zone.Map) || cell.GetEdifice(zone.Map) != null)
+                List<Thing> things = cell.GetThingList(zone.Map);
+                for (int i = 0; i < things.Count; i++)
                 {
-                    continue;
-                }
+                    Thing thing = things[i];
+                    if (thing == null)
+                    {
+                        continue;
+                    }
 
-                int distance = cell.DistanceToSquared(zone.BestCenterCell);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = cell;
+                    if (thing is Building_Storage)
+                    {
+                        return cell;
+                    }
+
+                    if (shelfDef != null && (thing.def == shelfDef || thing.def.entityDefToBuild == shelfDef || GenConstruct.BuiltDefOf(thing.def) == shelfDef))
+                    {
+                        return cell;
+                    }
                 }
             }
 
-            return best;
+            return FindOpenZoneCellNear(zone, zone.BestCenterCell + new IntVec3(0, 0, -3));
         }
 
         public static int CountExistingOrPlannedBeds(Zone_Settlement zone)
@@ -114,12 +123,176 @@ namespace FriendZone
                     if (thing.def == bedDef || thing.def.entityDefToBuild == bedDef || GenConstruct.BuiltDefOf(thing.def) == bedDef)
                     {
                         counted.Add(thing);
-                        count += Mathf.Max(1, thing.def.size.x * thing.def.size.z >= 2 ? 1 : 1);
+                        count += 1;
                     }
                 }
             }
 
             return count;
+        }
+
+        private static List<FieldRowPlan> BuildFieldRows(Zone_Settlement zone)
+        {
+            List<FieldRowPlan> bestRows = new List<FieldRowPlan>();
+            float bestScore = float.MinValue;
+            List<ThingDef> crops = GetPlannedCrops(zone);
+            if (zone == null || zone.Map == null || crops.Count == 0)
+            {
+                return bestRows;
+            }
+
+            for (int side = 0; side < 4; side++)
+            {
+                for (int offset = -6; offset <= 6; offset++)
+                {
+                    List<FieldRowPlan> candidate = CreateFieldRowsForSide(zone, crops, side, offset);
+                    float score = ScoreFieldRows(zone, candidate);
+                    if (candidate.Count > bestRows.Count || (candidate.Count == bestRows.Count && score > bestScore))
+                    {
+                        bestRows = candidate;
+                        bestScore = score;
+                    }
+                }
+            }
+
+            return bestRows;
+        }
+
+        private static List<ThingDef> GetPlannedCrops(Zone_Settlement zone)
+        {
+            List<ThingDef> crops = new List<ThingDef>
+            {
+                SettlementDefResolver.RicePlantDef(),
+                SettlementDefResolver.StrawberryPlantDef(),
+                SettlementDefResolver.CornPlantDef(),
+                SettlementDefResolver.HealrootPlantDef()
+            };
+
+            crops = crops.Where(def => def != null).Distinct().ToList();
+
+            List<ThingDef> extras = SettlementDefResolver.OptionalFieldCropDefs()
+                .Where(def => def != null && !crops.Contains(def))
+                .Distinct()
+                .ToList();
+
+            int seed = Mathf.Abs(zone.BestCenterCell.x * 397 ^ zone.BestCenterCell.z * 131);
+            for (int i = 0; i < Mathf.Min(2, extras.Count); i++)
+            {
+                crops.Add(extras[(seed + i) % extras.Count]);
+            }
+
+            return crops;
+        }
+
+        private static List<FieldRowPlan> CreateFieldRowsForSide(Zone_Settlement zone, List<ThingDef> crops, int side, int offset)
+        {
+            List<FieldRowPlan> rows = new List<FieldRowPlan>();
+            CellRect bounds = zone.ZoneBounds;
+            int bandWidth = crops.Count + ((crops.Count - 1) * FieldRowGap);
+
+            if (side == 0 || side == 1)
+            {
+                int startX = bounds.CenterCell.x - (bandWidth / 2) + offset;
+                int startZ = side == 0 ? bounds.maxZ + FieldBufferFromZone : bounds.minZ - FieldBufferFromZone - FieldRowLength + 1;
+
+                for (int i = 0; i < crops.Count; i++)
+                {
+                    int x = startX + (i * (1 + FieldRowGap));
+                    List<IntVec3> cells = new List<IntVec3>();
+                    for (int step = 0; step < FieldRowLength; step++)
+                    {
+                        int z = startZ + step;
+                        cells.Add(new IntVec3(x, 0, z));
+                    }
+
+                    if (IsValidFieldRow(zone, cells, crops[i]))
+                    {
+                        rows.Add(new FieldRowPlan { PlantDef = crops[i], Cells = cells });
+                    }
+                }
+            }
+            else
+            {
+                int startZ = bounds.CenterCell.z - (bandWidth / 2) + offset;
+                int startX = side == 2 ? bounds.minX - FieldBufferFromZone - FieldRowLength + 1 : bounds.maxX + FieldBufferFromZone;
+
+                for (int i = 0; i < crops.Count; i++)
+                {
+                    int z = startZ + (i * (1 + FieldRowGap));
+                    List<IntVec3> cells = new List<IntVec3>();
+                    for (int step = 0; step < FieldRowLength; step++)
+                    {
+                        int x = startX + step;
+                        cells.Add(new IntVec3(x, 0, z));
+                    }
+
+                    if (IsValidFieldRow(zone, cells, crops[i]))
+                    {
+                        rows.Add(new FieldRowPlan { PlantDef = crops[i], Cells = cells });
+                    }
+                }
+            }
+
+            return rows;
+        }
+
+        private static bool IsValidFieldRow(Zone_Settlement zone, List<IntVec3> cells, ThingDef crop)
+        {
+            if (zone == null || zone.Map == null || cells == null || cells.Count != FieldRowLength || crop == null)
+            {
+                return false;
+            }
+
+            float fertilityMin = crop.plant != null ? crop.plant.fertilityMin : 0f;
+            for (int i = 0; i < cells.Count; i++)
+            {
+                IntVec3 cell = cells[i];
+                if (!cell.InBounds(zone.Map) || zone.ContainsCell(cell) || !cell.Standable(zone.Map))
+                {
+                    return false;
+                }
+
+                if (cell.Fogged(zone.Map) || cell.Roofed(zone.Map))
+                {
+                    return false;
+                }
+
+                if (cell.GetEdifice(zone.Map) != null)
+                {
+                    return false;
+                }
+
+                TerrainDef terrain = cell.GetTerrain(zone.Map);
+                if (terrain == null || terrain.fertility < fertilityMin)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static float ScoreFieldRows(Zone_Settlement zone, List<FieldRowPlan> rows)
+        {
+            if (zone == null || rows == null || rows.Count == 0)
+            {
+                return float.MinValue;
+            }
+
+            float score = rows.Count * 1000f;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                FieldRowPlan row = rows[i];
+                for (int j = 0; j < row.Cells.Count; j++)
+                {
+                    IntVec3 cell = row.Cells[j];
+                    TerrainDef terrain = cell.GetTerrain(zone.Map);
+                    score += terrain != null ? terrain.fertility : 0f;
+                    score -= cell.DistanceTo(zone.BestCenterCell) * 0.05f;
+                }
+            }
+
+            return score;
         }
 
         private static void GenerateSharedStructures(Zone_Settlement zone)
@@ -145,6 +318,24 @@ namespace FriendZone
                     EnsureCampCommons(zone);
                     break;
             }
+        }
+
+        private static void EnsureStorageContainer(Zone_Settlement zone)
+        {
+            ThingDef shelfDef = SettlementDefResolver.ShelfDef();
+            ThingDef stuff = SettlementDefResolver.WoodStuff();
+            if (shelfDef == null)
+            {
+                return;
+            }
+
+            IntVec3 storageCell = GetStorageCell(zone);
+            if (!storageCell.IsValid)
+            {
+                return;
+            }
+
+            TryPlace(zone, shelfDef, storageCell, Rot4.North, shelfDef.MadeFromStuff ? stuff : null);
         }
 
         private static void EnsureHousing(Zone_Settlement zone, int requiredBeds)
@@ -233,14 +424,12 @@ namespace FriendZone
         private static void EnsureFarmCommons(Zone_Settlement zone)
         {
             EnsureCampCommons(zone);
+            IntVec3 storageCell = GetStorageCell(zone);
             ThingDef wood = SettlementDefResolver.WoodStuff();
-            foreach (IntVec3 cell in GetFieldCells(zone).Take(4))
+            if (storageCell.IsValid)
             {
-                if (cell.GetEdifice(zone.Map) == null)
-                {
-                    TryPlace(zone, SettlementDefResolver.TorchLampDef(), cell, Rot4.North, wood);
-                    break;
-                }
+                TryPlace(zone, SettlementDefResolver.TorchLampDef(), storageCell + new IntVec3(-1, 0, 0), Rot4.North, wood);
+                TryPlace(zone, SettlementDefResolver.TorchLampDef(), storageCell + new IntVec3(1, 0, 0), Rot4.North, wood);
             }
         }
 
@@ -282,11 +471,6 @@ namespace FriendZone
 
         private static void EnsureFieldMarkers(Zone_Settlement zone)
         {
-            if (zone.settlementKind != SettlementKind.Farm && zone.settlementKind != SettlementKind.Village && zone.settlementKind != SettlementKind.Inn && zone.settlementKind != SettlementKind.Tavern && zone.settlementKind != SettlementKind.Camp)
-            {
-                return;
-            }
-
             ThingDef wood = SettlementDefResolver.WoodStuff();
             List<IntVec3> cells = GetFieldCells(zone).ToList();
             if (cells.Count == 0)
@@ -315,6 +499,38 @@ namespace FriendZone
             minZ = Mathf.Clamp(minZ, 0, map.Size.z - height);
 
             return new CellRect(minX, minZ, width, height);
+        }
+
+        private static IntVec3 FindOpenZoneCellNear(Zone_Settlement zone, IntVec3 preferredCell)
+        {
+            if (zone == null || zone.Map == null)
+            {
+                return IntVec3.Invalid;
+            }
+
+            IntVec3 best = IntVec3.Invalid;
+            int bestDistance = int.MaxValue;
+            foreach (IntVec3 cell in zone.cells)
+            {
+                if (!cell.InBounds(zone.Map) || !cell.Standable(zone.Map))
+                {
+                    continue;
+                }
+
+                if (cell.GetEdifice(zone.Map) != null)
+                {
+                    continue;
+                }
+
+                int distance = cell.DistanceToSquared(preferredCell);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = cell;
+                }
+            }
+
+            return best;
         }
 
         private static void BuildSimpleRoom(Zone_Settlement zone, CellRect room, bool addDoor)
@@ -349,6 +565,21 @@ namespace FriendZone
             {
                 TryPlace(zone, wall, new IntVec3(room.minX, 0, z), Rot4.North, stuff);
                 TryPlace(zone, wall, new IntVec3(room.maxX, 0, z), Rot4.North, stuff);
+            }
+
+            if (zone.Map?.areaManager?.BuildRoof != null)
+            {
+                for (int x = room.minX + 1; x < room.maxX; x++)
+                {
+                    for (int z = room.minZ + 1; z < room.maxZ; z++)
+                    {
+                        IntVec3 roofCell = new IntVec3(x, 0, z);
+                        if (roofCell.InBounds(zone.Map) && zone.ContainsCell(roofCell))
+                        {
+                            zone.Map.areaManager.BuildRoof[roofCell] = true;
+                        }
+                    }
+                }
             }
         }
 

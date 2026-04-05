@@ -15,11 +15,6 @@ namespace FriendZone
         private const int RepeatSpawnDelay = 18000;
         private const int RetryDelay = 2400;
         private const float RentRate = 0.10f;
-
-        private readonly WorkGiver_ConstructDeliverResourcesToBlueprints deliverBlueprintResources = new WorkGiver_ConstructDeliverResourcesToBlueprints();
-        private readonly WorkGiver_ConstructDeliverResourcesToFrames deliverFrameResources = new WorkGiver_ConstructDeliverResourcesToFrames();
-        private readonly WorkGiver_ConstructFinishFrames finishFrames = new WorkGiver_ConstructFinishFrames();
-
         public MapComponent_SettlementManager(Map map)
             : base(map)
         {
@@ -57,6 +52,7 @@ namespace FriendZone
             }
 
             EnsureLord(zone);
+            ProgressConstruction(zone);
             AssignSettlementJobs(zone);
             ProcessRent(zone);
 
@@ -196,7 +192,33 @@ namespace FriendZone
                 dropCell = zone.BestCenterCell;
             }
 
-            DropSupply(dropCell, SettlementDefResolver.WoodStuff(), 320);
+            Dictionary<ThingDef, int> requiredSupplies = CalculateRequiredConstructionSupplies(zone);
+            ThingDef woodDef = SettlementDefResolver.WoodStuff();
+            ThingDef stoneDef = SettlementDefResolver.StoneBlocksDef();
+
+            int requiredWood = woodDef != null && requiredSupplies.ContainsKey(woodDef) ? requiredSupplies[woodDef] : 0;
+            int requiredStone = stoneDef != null && requiredSupplies.ContainsKey(stoneDef) ? requiredSupplies[stoneDef] : 0;
+
+            if (woodDef != null)
+            {
+                DropSupply(dropCell, woodDef, Mathf.Max(500, requiredWood));
+                requiredSupplies.Remove(woodDef);
+            }
+
+            if (stoneDef != null)
+            {
+                DropSupply(dropCell, stoneDef, Mathf.Max(500, requiredStone));
+                requiredSupplies.Remove(stoneDef);
+            }
+
+            foreach (KeyValuePair<ThingDef, int> pair in requiredSupplies)
+            {
+                if (pair.Key != null && pair.Value > 0)
+                {
+                    DropSupply(dropCell, pair.Key, pair.Value);
+                }
+            }
+
             DropSupply(dropCell, SettlementDefResolver.MealDef(), Mathf.Max(8, zone.DesiredSettlerCount * 2));
             DropSupply(dropCell, SettlementDefResolver.PotatoFoodDef(), 60);
         }
@@ -216,6 +238,50 @@ namespace FriendZone
 
             thing.stackCount = count;
             GenPlace.TryPlaceThing(thing, nearCell, map, ThingPlaceMode.Near);
+        }
+
+        private Dictionary<ThingDef, int> CalculateRequiredConstructionSupplies(Zone_Settlement zone)
+        {
+            Dictionary<ThingDef, int> required = new Dictionary<ThingDef, int>();
+            foreach (Thing thing in EnumerateSettlementThings(zone))
+            {
+                if (thing is Blueprint_Build blueprint)
+                {
+                    AddConstructionCostsToTotals(blueprint.def?.entityDefToBuild as ThingDef, blueprint.Stuff, required);
+                    continue;
+                }
+
+                if (thing is Frame frame)
+                {
+                    AddConstructionCostsToTotals(frame.def?.entityDefToBuild as ThingDef, frame.Stuff, required);
+                }
+            }
+
+            foreach (ThingDef def in required.Keys.ToList())
+            {
+                required[def] = Mathf.Max(0, required[def] - CountSettlementResources(zone, def));
+            }
+
+            return required;
+        }
+
+        private void AddConstructionCostsToTotals(ThingDef thingDef, ThingDef stuff, Dictionary<ThingDef, int> totals)
+        {
+            Dictionary<ThingDef, int> costs = GetConstructionCosts(thingDef, stuff);
+            foreach (KeyValuePair<ThingDef, int> pair in costs)
+            {
+                if (pair.Key == null || pair.Value <= 0)
+                {
+                    continue;
+                }
+
+                if (!totals.ContainsKey(pair.Key))
+                {
+                    totals[pair.Key] = 0;
+                }
+
+                totals[pair.Key] += pair.Value;
+            }
         }
 
         private void EnsureLord(Zone_Settlement zone)
@@ -243,7 +309,7 @@ namespace FriendZone
                     continue;
                 }
 
-                if (TryAssignConstructionJob(pawn, zone))
+                if (TryDepositInventoryToStorage(pawn, zone))
                 {
                     continue;
                 }
@@ -279,39 +345,251 @@ namespace FriendZone
                 || pawn.CurJob.def == SettlementDefResolver.Job("Wait");
         }
 
-        private bool TryAssignConstructionJob(Pawn pawn, Zone_Settlement zone)
+        private void ProgressConstruction(Zone_Settlement zone)
         {
-            foreach (Thing thing in EnumerateSettlementThings(zone))
+            Thing site = FindNextConstructionSite(zone);
+            if (site == null)
             {
-                if (thing is Blueprint_Build blueprint && blueprint.Faction == pawn.Faction)
-                {
-                    Job deliverJob = deliverBlueprintResources.JobOnThing(pawn, blueprint, false);
-                    if (TryTakeJob(pawn, deliverJob))
-                    {
-                        return true;
-                    }
-                }
+                return;
             }
 
-            foreach (Thing thing in EnumerateSettlementThings(zone))
+            Pawn builder = FindClosestAvailableSettler(zone, site.Position);
+            if (builder == null)
             {
-                if (thing is Frame frame && frame.Faction == pawn.Faction)
-                {
-                    Job deliverJob = deliverFrameResources.JobOnThing(pawn, frame, false);
-                    if (TryTakeJob(pawn, deliverJob))
-                    {
-                        return true;
-                    }
+                return;
+            }
 
-                    Job finishJob = finishFrames.JobOnThing(pawn, frame, false);
-                    if (TryTakeJob(pawn, finishJob))
-                    {
-                        return true;
-                    }
-                }
+            MoveBuilderTowardSite(builder, site.Position);
+
+            if (Find.TickManager.TicksGame % 1000 != 0)
+            {
+                return;
+            }
+
+            TryCompleteConstructionSite(zone, site);
+        }
+
+        private Thing FindNextConstructionSite(Zone_Settlement zone)
+        {
+            return EnumerateSettlementThings(zone)
+                .Where(thing => thing != null
+                    && !thing.Destroyed
+                    && thing.Faction == zone.settlementFaction
+                    && (thing is Blueprint_Build || thing is Frame))
+                .OrderBy(thing => thing.Position.DistanceToSquared(zone.BestCenterCell))
+                .FirstOrDefault();
+        }
+
+        private Pawn FindClosestAvailableSettler(Zone_Settlement zone, IntVec3 targetCell)
+        {
+            return zone.settlers
+                .Where(pawn => pawn != null
+                    && !pawn.Dead
+                    && !pawn.Destroyed
+                    && pawn.Spawned
+                    && !pawn.Downed
+                    && pawn.Position.InBounds(map))
+                .OrderBy(pawn => pawn.Position.DistanceToSquared(targetCell))
+                .FirstOrDefault();
+        }
+
+        private void MoveBuilderTowardSite(Pawn pawn, IntVec3 targetCell)
+        {
+            if (pawn == null || pawn.jobs == null || pawn.pather == null)
+            {
+                return;
+            }
+
+            if (pawn.Position.DistanceToSquared(targetCell) <= 2)
+            {
+                return;
+            }
+
+            JobDef gotoJobDef = SettlementDefResolver.Job("Goto");
+            if (gotoJobDef == null)
+            {
+                return;
+            }
+
+            if (pawn.CurJob != null && pawn.CurJob.def == gotoJobDef)
+            {
+                return;
+            }
+
+            Job job = JobMaker.MakeJob(gotoJobDef, targetCell);
+            TryTakeJob(pawn, job);
+        }
+
+        private bool TryCompleteConstructionSite(Zone_Settlement zone, Thing site)
+        {
+            if (site is Blueprint_Build blueprint)
+            {
+                return TryCompleteBlueprint(zone, blueprint);
+            }
+
+            if (site is Frame frame)
+            {
+                return TryCompleteFrame(zone, frame);
             }
 
             return false;
+        }
+
+        private bool TryCompleteBlueprint(Zone_Settlement zone, Blueprint_Build blueprint)
+        {
+            ThingDef thingDef = blueprint?.def?.entityDefToBuild as ThingDef;
+            if (thingDef == null)
+            {
+                return false;
+            }
+
+            ThingDef stuff = blueprint.Stuff;
+            if (!TrySpendConstructionResources(zone, thingDef, stuff))
+            {
+                return false;
+            }
+
+            Thing builtThing = ThingMaker.MakeThing(thingDef, thingDef.MadeFromStuff ? stuff : null);
+            if (builtThing == null)
+            {
+                return false;
+            }
+
+            IntVec3 cell = blueprint.Position;
+            Rot4 rotation = blueprint.Rotation;
+            blueprint.Destroy(DestroyMode.Vanish);
+            GenSpawn.Spawn(builtThing, cell, map, rotation);
+            return true;
+        }
+
+        private bool TryCompleteFrame(Zone_Settlement zone, Frame frame)
+        {
+            ThingDef thingDef = frame?.def?.entityDefToBuild as ThingDef;
+            if (thingDef == null)
+            {
+                return false;
+            }
+
+            ThingDef stuff = frame.Stuff;
+            if (!TrySpendConstructionResources(zone, thingDef, stuff))
+            {
+                return false;
+            }
+
+            Thing builtThing = ThingMaker.MakeThing(thingDef, thingDef.MadeFromStuff ? stuff : null);
+            if (builtThing == null)
+            {
+                return false;
+            }
+
+            IntVec3 cell = frame.Position;
+            Rot4 rotation = frame.Rotation;
+            frame.Destroy(DestroyMode.Vanish);
+            GenSpawn.Spawn(builtThing, cell, map, rotation);
+            return true;
+        }
+
+        private bool TrySpendConstructionResources(Zone_Settlement zone, ThingDef thingDef, ThingDef stuff)
+        {
+            Dictionary<ThingDef, int> costs = GetConstructionCosts(thingDef, stuff);
+            if (costs.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (KeyValuePair<ThingDef, int> cost in costs)
+            {
+                if (CountSettlementResources(zone, cost.Key) < cost.Value)
+                {
+                    return false;
+                }
+            }
+
+            foreach (KeyValuePair<ThingDef, int> cost in costs)
+            {
+                RemoveSettlementResources(zone, cost.Key, cost.Value);
+            }
+
+            return true;
+        }
+
+        private Dictionary<ThingDef, int> GetConstructionCosts(ThingDef thingDef, ThingDef stuff)
+        {
+            Dictionary<ThingDef, int> costs = new Dictionary<ThingDef, int>();
+            if (thingDef == null)
+            {
+                return costs;
+            }
+
+            if (thingDef.MadeFromStuff && stuff != null)
+            {
+                int stuffCount = Mathf.Max(1, Mathf.CeilToInt(thingDef.CostStuffCount));
+                costs[stuff] = stuffCount;
+            }
+
+            if (thingDef.CostList == null)
+            {
+                return costs;
+            }
+
+            foreach (ThingDefCountClass cost in thingDef.CostList)
+            {
+                if (cost?.thingDef == null || cost.count <= 0)
+                {
+                    continue;
+                }
+
+                if (!costs.ContainsKey(cost.thingDef))
+                {
+                    costs[cost.thingDef] = 0;
+                }
+
+                costs[cost.thingDef] += cost.count;
+            }
+
+            return costs;
+        }
+
+        private int CountSettlementResources(Zone_Settlement zone, ThingDef def)
+        {
+            if (zone == null || def == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+
+            foreach (Pawn pawn in zone.settlers)
+            {
+                if (pawn?.inventory?.innerContainer == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < pawn.inventory.innerContainer.Count; i++)
+                {
+                    Thing thing = pawn.inventory.innerContainer[i];
+                    if (thing != null && thing.def == def && !thing.Destroyed)
+                    {
+                        count += thing.stackCount;
+                    }
+                }
+            }
+
+            foreach (IntVec3 cell in zone.cells)
+            {
+                List<Thing> things = cell.GetThingList(map);
+                for (int i = 0; i < things.Count; i++)
+                {
+                    Thing thing = things[i];
+                    if (thing != null && thing.def == def && !thing.Destroyed)
+                    {
+                        count += thing.stackCount;
+                    }
+                }
+            }
+
+            return count;
         }
 
         private bool TryAssignFarmJob(Pawn pawn, Zone_Settlement zone)
@@ -319,7 +597,6 @@ namespace FriendZone
             JobDef harvestJobDef = SettlementDefResolver.Job("Harvest");
             JobDef sowJobDef = SettlementDefResolver.Job("Sow");
             JobDef cutPlantJobDef = SettlementDefResolver.Job("CutPlant");
-            ThingDef potatoPlantDef = SettlementDefResolver.PotatoPlantDef();
 
             foreach (IntVec3 cell in SettlementLayoutPlanner.GetFieldCells(zone))
             {
@@ -336,10 +613,11 @@ namespace FriendZone
 
             foreach (IntVec3 cell in SettlementLayoutPlanner.GetFieldCells(zone))
             {
+                ThingDef desiredPlantDef = SettlementLayoutPlanner.GetDesiredCropForCell(zone, cell);
                 Plant plant = GetPlantAt(cell);
                 if (plant != null)
                 {
-                    if (potatoPlantDef != null && plant.def != potatoPlantDef && cutPlantJobDef != null && pawn.CanReserveAndReach(plant, PathEndMode.Touch, Danger.Some))
+                    if (desiredPlantDef != null && plant.def != desiredPlantDef && cutPlantJobDef != null && pawn.CanReserveAndReach(plant, PathEndMode.Touch, Danger.Some))
                     {
                         Job cutJob = JobMaker.MakeJob(cutPlantJobDef, plant);
                         if (TryTakeJob(pawn, cutJob))
@@ -351,13 +629,13 @@ namespace FriendZone
                     continue;
                 }
 
-                if (sowJobDef == null || potatoPlantDef == null || !pawn.CanReserveAndReach(cell, PathEndMode.Touch, Danger.Some))
+                if (sowJobDef == null || desiredPlantDef == null || !pawn.CanReserveAndReach(cell, PathEndMode.Touch, Danger.Some))
                 {
                     continue;
                 }
 
                 Job sowJob = JobMaker.MakeJob(sowJobDef, cell);
-                sowJob.plantDefToSow = potatoPlantDef;
+                sowJob.plantDefToSow = desiredPlantDef;
                 if (TryTakeJob(pawn, sowJob))
                 {
                     return true;
@@ -365,6 +643,48 @@ namespace FriendZone
             }
 
             return false;
+        }
+
+        private bool TryDepositInventoryToStorage(Pawn pawn, Zone_Settlement zone)
+        {
+            if (pawn?.inventory?.innerContainer == null || pawn.inventory.innerContainer.Count == 0)
+            {
+                return false;
+            }
+
+            Thing thingToDeposit = pawn.inventory.innerContainer
+                .FirstOrDefault(thing => thing != null && !thing.Destroyed && IsRentableResource(thing));
+            if (thingToDeposit == null)
+            {
+                return false;
+            }
+
+            IntVec3 storageCell = SettlementLayoutPlanner.GetStorageCell(zone);
+            if (!storageCell.IsValid)
+            {
+                return false;
+            }
+
+            JobDef gotoJobDef = SettlementDefResolver.Job("Goto");
+            if (pawn.Position.DistanceToSquared(storageCell) > 4)
+            {
+                if (gotoJobDef == null)
+                {
+                    return false;
+                }
+
+                Job gotoJob = JobMaker.MakeJob(gotoJobDef, storageCell);
+                return TryTakeJob(pawn, gotoJob);
+            }
+
+            Thing carried = thingToDeposit.SplitOff(thingToDeposit.stackCount);
+            if (carried == null)
+            {
+                return false;
+            }
+
+            GenPlace.TryPlaceThing(carried, storageCell, map, ThingPlaceMode.Near);
+            return true;
         }
 
         private bool TryAssignHuntJob(Pawn pawn, Zone_Settlement zone)

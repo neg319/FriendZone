@@ -3,10 +3,10 @@
   <packageId>vyberware.friendzone</packageId>
   <name>FriendZone</name>
   <author>Johnny Berry</author>
-  <description>Adds a new FriendZone to the Zone architect tab. Draw out an area like a growing zone, pick a settlement style, and an allied non player faction will begin claiming the area, bringing in settlers from off map, laying down its own blueprints, building enclosed housing with beds, planting field plots, hunting nearby wildlife, and paying 10% resource rent into player stockpiles. Structured as a GitHub friendly RimWorld 1.6 source project.</description>
+  <description>Adds a new FriendZone to the Zone architect tab. Draw out an area like a growing zone, pick a settlement style, and an allied non player faction will begin claiming the area, bringing in settlers from off map, laying down its own blueprints, building enclosed housing with beds, creating outside crop rows, using its own storage container, hunting nearby wildlife, and paying 10% resource rent into player stockpiles. Structured as a GitHub friendly RimWorld 1.6 source project.</description>
   <supportedVersions>
     <li>1.6</li>
   </supportedVersions>
-  <modVersion IgnoreIfNoMatchingField="True">0.3.0</modVersion>
+  <modVersion IgnoreIfNoMatchingField="True">0.3.7</modVersion>
   <url>https://github.com/Vyberware/FriendZone</url>
 </ModMetaData>

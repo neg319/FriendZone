@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
 using Verse;
@@ -40,6 +41,16 @@ namespace FriendZone
             return Thing("WoodLog") ?? Thing("Steel");
         }
 
+        public static ThingDef StoneBlocksDef()
+        {
+            return Thing("SandstoneBlocks")
+                ?? Thing("GraniteBlocks")
+                ?? Thing("LimestoneBlocks")
+                ?? Thing("SlateBlocks")
+                ?? Thing("MarbleBlocks")
+                ?? DefDatabase<ThingDef>.AllDefsListForReading.FirstOrDefault(def => def != null && def.defName != null && def.defName.EndsWith("Blocks"));
+        }
+
         public static ThingDef BedDef()
         {
             return Thing("Bed") ?? Thing("SleepingSpot");
@@ -58,6 +69,55 @@ namespace FriendZone
         public static ThingDef PotatoPlantDef()
         {
             return Thing("Plant_Potato");
+        }
+
+        public static ThingDef RicePlantDef()
+        {
+            return Thing("Plant_Rice");
+        }
+
+        public static ThingDef StrawberryPlantDef()
+        {
+            return Thing("Plant_Strawberry");
+        }
+
+        public static ThingDef CornPlantDef()
+        {
+            return Thing("Plant_Corn");
+        }
+
+        public static ThingDef HealrootPlantDef()
+        {
+            return Thing("Plant_Healroot");
+        }
+
+        public static ThingDef CottonPlantDef()
+        {
+            return Thing("Plant_Cotton");
+        }
+
+        public static ThingDef HaygrassPlantDef()
+        {
+            return Thing("Plant_Haygrass");
+        }
+
+        public static ThingDef PsychoidPlantDef()
+        {
+            return Thing("Plant_Psychoid");
+        }
+
+        public static ThingDef SmokeleafPlantDef()
+        {
+            return Thing("Plant_Smokeleaf");
+        }
+
+        public static IEnumerable<ThingDef> OptionalFieldCropDefs()
+        {
+            yield return PotatoPlantDef();
+            yield return CottonPlantDef();
+            yield return HaygrassPlantDef();
+            yield return PsychoidPlantDef();
+            yield return SmokeleafPlantDef();
         }
 
         public static ThingDef WallDef()
@@ -88,6 +148,11 @@ namespace FriendZone
         public static ThingDef ChairDef()
         {
             return Thing("DiningChair") ?? Thing("Stool");
+        }
+
+        public static ThingDef ShelfDef()
+        {
+            return Thing("ShelfSmall") ?? Thing("Shelf") ?? Thing("ShelfLarge");
         }
 
         public static ThingDef ShortBowDef()
