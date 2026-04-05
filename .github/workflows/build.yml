@@ -28,11 +28,22 @@ jobs:
         shell: pwsh
         run: |
           $staging = Join-Path $env:RUNNER_TEMP 'FriendZone'
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          robocopy . $staging /E /XD .git .github Source\FriendZone\bin Source\FriendZone\obj | Out-Null
-          if (!(Test-Path (Join-Path $staging 'Assemblies\FriendZone.dll'))) {
-            throw 'Build did not produce Assemblies\FriendZone.dll'
+          if (Test-Path $staging) {
+            Remove-Item -Recurse -Force $staging
           }
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+          if (!(Test-Path 'Assemblies/FriendZone.dll')) {
+            throw 'Build did not produce Assemblies/FriendZone.dll'
+          }
+
+          $itemsToCopy = @('About', 'Defs', 'Languages', 'Textures', 'Assemblies', 'README.md')
+          foreach ($item in $itemsToCopy) {
+            if (Test-Path $item) {
+              Copy-Item $item -Destination $staging -Recurse -Force
+            }
+          }
+
           Compress-Archive -Path (Join-Path $staging '*') -DestinationPath FriendZone.zip -Force
 
       - name: Upload artifact
