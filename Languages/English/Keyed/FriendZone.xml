@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <FriendZone>FriendZone</FriendZone>
+  <DesignatorFriendZoneDesc>Designate an area for an allied off map settlement group. The zone can lay out its own plans, call in friendly settlers, build enclosed housing with beds, plant and harvest field plots, hunt nearby wildlife, and skim 10% of its gathered resources to your stockpiles as rent.</DesignatorFriendZoneDesc>
+  <FriendZoneMustBeStandable>This zone must be placed on standable ground.</FriendZoneMustBeStandable>
+
+  <FriendZoneTypeInspect>Type: {0}</FriendZoneTypeInspect>
+  <FriendZonePopulationInspect>Settlers: {0}/{1}</FriendZonePopulationInspect>
+  <FriendZoneFactionInspect>Faction: {0}</FriendZoneFactionInspect>
+  <FriendZoneStatusEnabled>Status: Active</FriendZoneStatusEnabled>
+  <FriendZoneStatusDisabled>Status: Paused</FriendZoneStatusDisabled>
+  <FriendZonePlanPending>Plan: Waiting to generate</FriendZonePlanPending>
+  <FriendZoneRentInspect>Rent: 10% of gained resources is delivered to the player</FriendZoneRentInspect>
+
+  <FriendZoneChooseTypeLabel>Choose type</FriendZoneChooseTypeLabel>
+  <FriendZoneChooseTypeDesc>Select the kind of settlement this zone should grow into.</FriendZoneChooseTypeDesc>
+  <FriendZoneEnableLabel>Enable settlement</FriendZoneEnableLabel>
+  <FriendZoneEnableDesc>Toggle whether this settlement zone should keep planning and calling in new settlers.</FriendZoneEnableDesc>
+  <FriendZoneRefreshPlanLabel>Refresh plan</FriendZoneRefreshPlanLabel>
+  <FriendZoneRefreshPlanDesc>Ask the settlement zone to try laying out its blueprint plan again. This does not delete anything already placed.</FriendZoneRefreshPlanDesc>
+  <FriendZonePlanRefreshQueued>Settlement plan refresh queued for {0}.</FriendZonePlanRefreshQueued>
+  <FriendZoneTypeChanged>{0} is now set to {1}.</FriendZoneTypeChanged>
+  <FriendZoneSettlerArrived>{0} has arrived to help establish {1} as a {2} settlement for {3}.</FriendZoneSettlerArrived>
+
+  <SettlementKind_Camp>Camp</SettlementKind_Camp>
+  <SettlementKind_Farm>Farm</SettlementKind_Farm>
+  <SettlementKind_Tavern>Tavern</SettlementKind_Tavern>
+  <SettlementKind_Inn>Inn</SettlementKind_Inn>
+  <SettlementKind_Village>Village</SettlementKind_Village>
+</LanguageData>
