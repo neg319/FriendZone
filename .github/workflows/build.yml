@@ -1,4 +1,4 @@
-name: Build Settlement Zone
+name: Build FriendZone
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
@@ -19,24 +19,24 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore packages
-        run: dotnet restore Source/SettlementZone/SettlementZone.csproj
+        run: dotnet restore Source/FriendZone/FriendZone.csproj
 
       - name: Build project
-        run: dotnet build Source/SettlementZone/SettlementZone.csproj --configuration Release --no-restore
+        run: dotnet build Source/FriendZone/FriendZone.csproj --configuration Release --no-restore
 
       - name: Package mod
         shell: pwsh
         run: |
-          $staging = Join-Path $env:RUNNER_TEMP 'SettlementZone'
+          $staging = Join-Path $env:RUNNER_TEMP 'FriendZone'
           New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          robocopy . $staging /E /XD .git .github Source\SettlementZone\bin Source\SettlementZone\obj | Out-Null
-          if (!(Test-Path (Join-Path $staging 'Assemblies\SettlementZone.dll'))) {
-            throw 'Build did not produce Assemblies\SettlementZone.dll'
+          robocopy . $staging /E /XD .git .github Source\FriendZone\bin Source\FriendZone\obj | Out-Null
+          if (!(Test-Path (Join-Path $staging 'Assemblies\FriendZone.dll'))) {
+            throw 'Build did not produce Assemblies\FriendZone.dll'
           }
-          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath SettlementZone.zip -Force
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath FriendZone.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SettlementZone
-          path: SettlementZone.zip
+          name: FriendZone
+          path: FriendZone.zip
