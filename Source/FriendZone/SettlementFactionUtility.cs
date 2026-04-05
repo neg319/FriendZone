@@ -9,22 +9,12 @@ namespace FriendZone
     {
         public static Faction ResolveFaction(Zone_Settlement zone)
         {
-            if (zone?.settlementFaction != null)
+            if (zone?.settlementFaction != null && IsValidSettlementFaction(zone.settlementFaction))
             {
                 return zone.settlementFaction;
             }
 
             Faction faction = FindBestExistingFaction();
-            if (faction == null)
-            {
-                faction = CreateNewSettlementFaction();
-            }
-
-            if (faction != null && Faction.OfPlayer != null)
-            {
-                faction.TrySetRelationKind(Faction.OfPlayer, FactionRelationKind.Ally, canSendLetter: false);
-            }
-
             if (zone != null)
             {
                 zone.settlementFaction = faction;
@@ -35,7 +25,7 @@ namespace FriendZone
 
         private static Faction FindBestExistingFaction()
         {
-            if (Find.FactionManager == null)
+            if (Find.FactionManager == null || Faction.OfPlayer == null)
             {
                 return null;
             }
@@ -54,15 +44,30 @@ namespace FriendZone
                 return allied;
             }
 
-            return candidates
+            Faction friendly = candidates
                 .Where(f => f.RelationKindWith(Faction.OfPlayer) != FactionRelationKind.Hostile)
+                .OrderByDescending(f => f.GoodwillWith(Faction.OfPlayer))
+                .FirstOrDefault();
+
+            if (friendly != null)
+            {
+                return friendly;
+            }
+
+            return Find.FactionManager.AllFactionsListForReading
+                .Where(f => f != null && !f.IsPlayer && f.def != null && !f.Hidden && !f.HostileTo(Faction.OfPlayer))
                 .OrderByDescending(f => f.GoodwillWith(Faction.OfPlayer))
                 .FirstOrDefault();
         }
 
         private static bool IsValidSettlementFaction(Faction faction)
         {
-            if (faction == null || faction.IsPlayer || faction.def == null || faction.Hidden || faction.HostileTo(Faction.OfPlayer))
+            if (faction == null || faction.IsPlayer || faction.def == null || faction.Hidden || Faction.OfPlayer == null)
+            {
+                return false;
+            }
+
+            if (faction.HostileTo(Faction.OfPlayer))
             {
                 return false;
             }
@@ -71,24 +76,6 @@ namespace FriendZone
                 || faction.def.defName == "OutlanderCivil"
                 || faction.def.defName == "OutlanderRefugee"
                 || faction.def.defName == "Empire";
-        }
-
-        private static Faction CreateNewSettlementFaction()
-        {
-            FactionDef factionDef = SettlementDefResolver.PreferredSettlementFactionDef();
-            if (factionDef == null)
-            {
-                return null;
-            }
-
-            Faction faction = FactionGenerator.NewGeneratedFaction(factionDef);
-            if (faction == null)
-            {
-                return null;
-            }
-
-            Find.FactionManager.Add(faction);
-            return faction;
         }
     }
 }

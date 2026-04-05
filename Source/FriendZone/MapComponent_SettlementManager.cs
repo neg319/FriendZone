@@ -231,7 +231,7 @@ namespace FriendZone
                 return;
             }
 
-            LordMaker.MakeNewLord(zone.settlementFaction, new LordJob_DefendBase(zone.settlementFaction, zone.BestCenterCell), map, spawnedSettlers);
+            LordMaker.MakeNewLord(zone.settlementFaction, new LordJob_DefendBase(zone.settlementFaction, zone.BestCenterCell, 251999, false), map, spawnedSettlers);
         }
 
         private void AssignSettlementJobs(Zone_Settlement zone)
